@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบส่งข้อมูลและรูปภาพ</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; padding: 20px; color: #333; }
+        .container { max-width: 700px; background: white; padding: 30px; margin: 0 auto; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #4CAF50; margin-bottom: 25px; }
+        .form-group { margin-bottom: 18px; }
+        label { font-weight: bold; display: block; margin-bottom: 8px; }
+        input[type="date"], select, textarea, input[type="file"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        textarea { height: 100px; resize: vertical; }
+        
+        /* Grid 5x4 สำหรับแสดงรูปภาพ */
+        .preview-grid { 
+            display: grid; 
+            grid-template-columns: repeat(5, 1fr); 
+            grid-template-rows: repeat(4, 1fr);
+            gap: 10px; 
+            margin-top: 15px; 
+            background: #eee;
+            padding: 10px;
+            border-radius: 6px;
+            min-height: 120px;
+        }
+        .preview-item { width: 100%; aspect-ratio: 1; border-radius: 4px; overflow: hidden; background: #ddd; position: relative; }
+        .preview-item img { width: 100%; height: 100%; object-fit: cover; }
+        
+        button { width: 100%; background-color: #4CAF50; color: white; border: none; padding: 14px; font-size: 16px; font-weight: bold; border-radius: 4px; cursor: pointer; margin-top: 20px; transition: 0.3s; }
+        button:hover { background-color: #45a049; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        .loading { display: none; text-align: center; font-weight: bold; color: #ff9800; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>ฟอร์มส่งข้อมูลและรูปภาพ</h2>
+    <form id="uploadForm">
+        
+        <div class="form-group">
+            <label for="uploadDate">1. วันที่อัพรูป</label>
+            <input type="date" id="uploadDate" required>
+        </div>
+
+        <div class="form-group">
+            <label for="nameSelect">2. ชื่อผู้ส่ง</label>
+            <select id="nameSelect" required>
+                <option value="">-- เลือกชื่อ --</option>
+                </select>
+        </div>
+
+        <div class="form-group">
+            <label for="branchSelect">3. สาขา</label>
+            <select id="branchSelect" required>
+                <option value="">-- เลือกสาขา --</option>
+                </select>
+        </div>
+
+        <div class="form-group">
+            <label for="details">4. รายละเอียดเพิ่มเติม</label>
+            <textarea id="details" placeholder="พิมพ์รายละเอียดที่นี่..."></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="imageInput">5. อัพโหลดรูปภาพ (เลือกได้สูงสุด 10 รูป)</label>
+            <input type="file" id="imageInput" accept="image/*" multiple>
+            
+            <div class="preview-grid" id="previewGrid"></div>
+        </div>
+
+        <button type="submit" id="submitBtn">ส่งข้อมูลไปยัง Google Sheets</button>
+        <div class="loading" id="loadingText">กำลังอัพโหลดรูปภาพและบันทึกข้อมูล กรุณารอออ...</div>
+    </form>
+</div>
+
+<script>
+    // แทนที่ด้วย Web App URL ของคุณที่ได้มาจาก Google Apps Script
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzMIzl4UttTTVnBDpgvX0zqSebvjJxvIneBgpUL_o7HG7NbWWeUJDUFISM-XHbWfg/exec";
+
+    // 1. สร้างตัวเลือก ชื่อที่ 1-10 และ สาขาที่ 1-10 อัตโนมัติ
+    const nameSelect = document.getElementById('nameSelect');
+    const branchSelect = document.getElementById('branchSelect');
+    
+    for (let i = 1; i <= 10; i++) {
+        nameSelect.options[nameSelect.options.length] = new Option(`ชื่อที่ ${i}`, `ชื่อที่ ${i}`);
+        branchSelect.options[branchSelect.options.length] = new Option(`สาขาที่ ${i}`, `สาขาที่ ${i}`);
+    }
+
+    // 2. จัดการการเลือกรูปภาพ และแสดงใน Grid ทันที
+    let selectedImages = [];
+    const imageInput = document.getElementById('imageInput');
+    const previewGrid = document.getElementById('previewGrid');
+
+    // สร้างช่อง Grid ว่างๆ รอไว้ 20 ช่อง (5x4) เพื่อความสวยงามตามโครงสร้าง
+    function initGrid() {
+        previewGrid.innerHTML = '';
+        for(let i=0; i<20; i++) {
+            let item = document.createElement('div');
+            item.className = 'preview-item';
+            previewGrid.appendChild(item);
+        }
+    }
+    initGrid();
+
+    imageInput.addEventListener('change', function(e) {
+        initGrid(); // รีเซ็ตกริดก่อนใส่รูปจริง
+        const files = Array.from(e.target.files);
+        
+        if (files.length > 10) {
+            alert("สามารถเลือกรูปภาพได้ไม่เกิน 10 รูปเท่านั้นครับ");
+            imageInput.value = "";
+            return;
+        }
+
+        selectedImages = [];
+        const gridItems = previewGrid.children;
+
+        files.forEach((file, index) => {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                // เก็บข้อมูล Base64 ไว้ส่ง
+                selectedImages.push({
+                    base64: event.target.result,
+                    type: file.type
+                });
+
+                // แสดงผลในช่อง Grid ทันทีตามลำดับ
+                if (index < 20) {
+                    gridItems[index].innerHTML = `<img src="${event.target.result}">`;
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+    });
+
+    // 3. จัดการตอนส่งฟอร์ม (Submit)
+    document.getElementById('uploadForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const submitBtn = document.getElementById('submitBtn');
+        const loadingText = document.getElementById('loadingText');
+        
+        submitBtn.disabled = true;
+        loadingText.style.display = 'block';
+
+        const payload = {
+            uploadDate: document.getElementById('uploadDate').value,
+            name: document.getElementById('nameSelect').value,
+            branch: document.getElementById('branchSelect').value,
+            details: document.getElementById('details').value,
+            images: selectedImages
+        };
+
+        // ส่งข้อมูลไปยัง Google Apps Script Web App แบบ POST
+        fetch(WEB_APP_URL, {
+            method: 'POST',
+            mode: 'no-cors', // จำเป็นต้องใช้โหมดนี้เมื่อยิงเข้า Google Apps Script ข้ามโดเมนแบบง่าย
+            cache: 'no-cache',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(() => {
+            alert('บันทึกข้อมูลและอัพโหลดรูปภาพเรียบร้อยแล้ว!');
+            document.getElementById('uploadForm').reset();
+            initGrid();
+            selectedImages = [];
+            submitBtn.disabled = false;
+            loadingText.style.display = 'none';
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('เกิดข้อผิดพลาดในการส่งข้อมูล');
+            submitBtn.disabled = false;
+            loadingText.style.display = 'none';
+        });
+    });
+</script>
+
+</body>
+</html>
